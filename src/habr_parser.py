@@ -1,4 +1,3 @@
-import random
 import json
 import requests
 import datetime
@@ -32,65 +31,73 @@ class HabrParser:
 
     @dataclass
     class Article:
-        name: str = None
-        link: str = None
+        id: int = None
+        author_link: str = None
+        title: str = None
+        article_link: str = None
         rating: int = 0
-        article_text: BeautifulSoup = None
+        timestamp: datetime.datetime = None
+        text: BeautifulSoup = None
 
         def _write_format(self):
             article = asdict(article)
 
-            article.pop('name')
+            article.pop('id')
             if article['text'] == None:
                 article.pop('text')
             
             return article
 
+    def _parse_article_from_page(self, article_soup: BeautifulSoup):
+        article = self.Article()
+        article.id = article_soup.get('id')
 
-    def _parse_article_by_link(self, article: Article):
-        article_html = requests.get(article.link, headers=self.headers).text
-        article_soup = BeautifulSoup(article_html, 'lxml')
+        author_soup = article_soup.find('a', class_='tm-user-info__username')
+        article.author_link = f"https://habr.com{author_soup.get('href')}"
+
+        title_soup = article_soup.find('a', class_='tm-title__link')
+        article.title = title_soup.find('span').get_text()
+        article.article_link = f"https://habr.com{title_soup.get('href')}"
+        
+        # ISO format timestamp
+        timestamp = article_soup.find('time').get('datetime')
+        article.timestamp = datetime.fromisoformat(timestamp)
 
         rating_class = (
-            'tm-votes-lever__score '
-            'tm-votes-lever__score '
-            'tm-votes-lever__score_appearance-article'
+            'tm-votes-meter__value ',
+            'tm-votes-meter__value ',
+            'tm-votes-meter__value_appearance-article ',
+            'tm-votes-meter__value_rating'
         )
-
-        rating = article_soup.find(
-            'div',
+        article.rating = article_soup.find(
+            'span',
             class_=rating_class
         ).get_text()
-        article.rating = int(rating)
 
         if article.rating <= -10 and article.text == None:
-            article_text_class = (
+            text_page = requests.get(article.link, headers=self.headers).text
+            text_soup = BeautifulSoup(text_page, 'lxml')
+
+            text_class = (
                 'tm-article-presenter__content '
                 'tm-article-presenter__content_narrow'
             )
-            article.article_text = article_soup.find(
+            article.text = text_soup.find(
                 'article',
-                class_=article_text_class
+                class_=text_class
             )
 
+        # Check article.timestamp > last timestamp in database
+        if False:
+            return None
+            
         return article
 
-    def _parse_article_from_page(self, article_soup: BeautifulSoup):
-        article = self.Article()
-        article.name = article_soup.find('span')
-        article.link = f"https://habr.com{article_soup.get('href')}"
-
-        # Check link is already in file
-        # If true - stop parsing
-        with open(self.json_file_name, 'r', encoding='utf-8') as file:
-            saved_articles = json.load(file)
-            if article.name in saved_articles.keys():
-                return None
-            
-        return self._parse_article_by_link(article)
-
     def _parse_page(self, page_soup: BeautifulSoup):
-        all_hrefs_articles = page_soup.find_all('a', class_='tm-title__link')
+        all_hrefs_articles = page_soup.find_all(
+            'article',
+            class_='tm-articles-list__item'
+        )
         article_dict = {}
 
         for article_soup in all_hrefs_articles[::-1]:
