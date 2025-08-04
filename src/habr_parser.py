@@ -1,21 +1,28 @@
 import json
-import requests
 import datetime
 from dataclasses import dataclass, asdict
 
-import aiohttp
+import asyncio
+from aiohttp import ClientSession
 from bs4 import BeautifulSoup
 from fake_useragent import UserAgent
 
 class HabrParser:
-    def __init__(self, json_file_name):
+    def __init__(
+        self,
+        json_file_name,
+        content_type='article'
+    ):
         ua = UserAgent()
 
         self.headers = {
             'accept': "application/json, text/plain, */*",
             'user-agent': ua.google
         }
-        self.url = f"https://habr.com/ru/articles/"
+        self.content_type = content_type
+
+        if content_type == 'article':
+            self.url = f"https://habr.com/ru/articles/"
         self.json_file_name = json_file_name
 
     def _write_json(self, new_json_data):
@@ -28,6 +35,7 @@ class HabrParser:
 
         with open(self.json_file_name, 'w', encoding='utf-8') as file:
             json.dump(new_json_data, file)
+
 
     @dataclass
     class Article:
@@ -47,8 +55,9 @@ class HabrParser:
                 article.pop('text')
             
             return article
+        
 
-    def _parse_article_from_page(self, article_soup: BeautifulSoup):
+    async def _parse_article_from_page(self, article_soup: BeautifulSoup):
         article = self.Article()
         article.id = article_soup.get('id')
 
@@ -75,9 +84,14 @@ class HabrParser:
         ).get_text()
 
         if article.rating <= -10 and article.text == None:
-            text_page = requests.get(article.link, headers=self.headers).text
-            text_soup = BeautifulSoup(text_page, 'lxml')
+            async with ClientSession() as session:
+                async with session.get(article.article_link) as resp:
+                    # Handle and log errors
+                    if resp.status != 200:
+                        pass
+                    text_page = await resp.text()
 
+            text_soup = BeautifulSoup(text_page, 'lxml')
             text_class = (
                 'tm-article-presenter__content '
                 'tm-article-presenter__content_narrow'
@@ -93,7 +107,7 @@ class HabrParser:
             
         return article
 
-    def _parse_page(self, page_soup: BeautifulSoup):
+    async def _parse_page(self, page_soup: BeautifulSoup):
         all_hrefs_articles = page_soup.find_all(
             'article',
             class_='tm-articles-list__item'
@@ -110,28 +124,38 @@ class HabrParser:
             name = article.name
             article_dict[name] = article._write_format()
 
-        return article_dict 
+        return article_dict
 
-    def parse_habr(self):
-        article_dict = {}
-        page_html = requests.get(self.url, headers=self.headers).text
+    async def _get_habr_page(self, url):
+        async with ClientSession() as session:
+            async with session.get(url) as resp:
+                # Handle and log errors
+                if resp.status != 200:
+                    pass
+                page_html = await resp.text()
+        
         page_soup = BeautifulSoup(page_html, 'lxml')
+        return self._parse_page(page_soup)
 
-        article_dict.update(self._parse_page(page_soup))
-        pages_count = page_soup.find_all(
-            'a',
-            class_="tm-pagination__page"
-        )[-1]
+    async def parse_habr(self):
+        async def async_work():
+            article_dict = {}
+            tasks = []
 
-        for page_num in range(1, pages_count + 1):
-            url = self.url + f"page{page_num}/"
-            page_html = requests(url, headers=self.headers)
-            page_soup = BeautifulSoup(page_html, 'lxml')
+            # Go through habr pages (const 1-50)
+            for page_num in range(1, 51):
+                url = self.url + f"page{page_num}/"
+                tasks.append(asyncio.create_task(self._get_habr_page(url)))
 
-            article_dict.update(self._parse_page(page_soup))
+            results = await asyncio.gather(*tasks)
 
-        with open(self.json_file_name, 'w', encoding='utf-8') as file:
-            json.dump(article_dict, file)
+            for result in results:
+                article_dict.update(result)
+
+            with open(self.json_file_name, 'w', encoding='utf-8') as file:
+                json.dump(article_dict, file)
+        
+        asyncio.run(async_work())
 
     def update_articles(self, kind='all'):
         with open(self.json_file_name, 'r', encoding='utf-8') as file:
@@ -144,7 +168,9 @@ class HabrParser:
                 continue
 
             article = self.Article(name=article_name, **article)
-            article = self._parse_article_by_link(article)
+
+            # Write _parse_article logic
+            article = None # self._parse_article_by_link(article)
 
             saved_articles[article_name] = article
         
