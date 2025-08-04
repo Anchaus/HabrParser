@@ -201,8 +201,7 @@ class HabrParser:
 
             article = self.Article(name=article_name, **article)
 
-            # Write _parse_article logic
-            article = None # self._parse_article_by_link(article)
+            article = self.update_article(article)
 
             saved_articles[article_name] = article
         
