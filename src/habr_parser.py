@@ -57,6 +57,35 @@ class HabrParser:
             return article
         
 
+    async def _update_article(self, article):
+        async with ClientSession() as session:
+            async with session.get(url=article.article_link,
+                                   headers=self.headers) as resp:
+                article_html = await resp.text()
+            
+        article_soup = BeautifulSoup(article_html, 'lxml')
+
+        rating_class = (
+        'tm-votes-lever__score ',
+        'tm-votes-lever__score_appearance-article ',
+        'tm-votes-lever__score'
+        )
+        article.rating = article_soup.find(
+            'div',
+            class_=rating_class
+        ).get_text()
+
+        if article.rating <= -10 and article.text == None:
+            text_class = (
+                'article-formatted-body ',
+                'article-formatted-body ',
+                'article-formatted-body_version-2'
+            )
+            article.text = article_soup.find(
+                'div',
+                class_=text_class
+            )
+    
     async def _parse_article_from_page(self, article_soup: BeautifulSoup):
         article = self.Article()
         article.id = article_soup.get('id')
@@ -83,21 +112,22 @@ class HabrParser:
             class_=rating_class
         ).get_text()
 
-        if article.rating <= -10 and article.text == None:
+        if article.rating <= -10:
             async with ClientSession() as session:
                 async with session.get(article.article_link) as resp:
                     # Handle and log errors
                     if resp.status != 200:
                         pass
-                    text_page = await resp.text()
+                    article_html = await resp.text()
 
-            text_soup = BeautifulSoup(text_page, 'lxml')
+            text_soup = BeautifulSoup(article_html, 'lxml')
             text_class = (
-                'tm-article-presenter__content '
-                'tm-article-presenter__content_narrow'
+                'article-formatted-body ',
+                'article-formatted-body ',
+                'article-formatted-body_version-2'
             )
-            article.text = text_soup.find(
-                'article',
+            article.text = article_soup.find(
+                'div',
                 class_=text_class
             )
 
@@ -152,12 +182,14 @@ class HabrParser:
             for result in results:
                 article_dict.update(result)
 
+            # Change to database query
             with open(self.json_file_name, 'w', encoding='utf-8') as file:
                 json.dump(article_dict, file)
         
         asyncio.run(async_work())
 
-    def update_articles(self, kind='all'):
+    async def update_articles(self, kind='all'):
+        # Change to database query
         with open(self.json_file_name, 'r', encoding='utf-8') as file:
             saved_articles = json.load(file)
         
@@ -174,5 +206,6 @@ class HabrParser:
 
             saved_articles[article_name] = article
         
+        # Change to database query
         with open(self.json_file_name, 'w', encoding='utf-8') as file:
             json.dump(saved_articles, file)
