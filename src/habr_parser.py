@@ -1,16 +1,17 @@
-import json
-import datetime
 from dataclasses import dataclass, asdict
+import datetime
+import json
 
-import asyncio
 from aiohttp import ClientSession
+import asyncio
 from bs4 import BeautifulSoup
 from fake_useragent import UserAgent
 
+# TODO: Make posts and news parse logic
 class HabrParser:
     def __init__(
         self,
-        json_file_name,
+        json_file_name, # TODO: Change to database logic
         content_type='article'
     ):
         ua = UserAgent()
@@ -21,10 +22,14 @@ class HabrParser:
         }
         self.content_type = content_type
 
-        if content_type == 'article':
-            self.url = f"https://habr.com/ru/articles/"
+        if content_type != 'article':
+            raise ValueError(
+                "HabrParser can't handle posts and news in this version"
+            )
+        self.url = f"https://habr.com/ru/{content_type}/"
         self.json_file_name = json_file_name
 
+    # TODO: Change to database query
     def _write_json(self, new_json_data):
         with open(self.json_file_name, 'r', encoding='utf-8') as file:
             old_json_data = json.load(file)
@@ -55,14 +60,21 @@ class HabrParser:
                 article.pop('text')
             
             return article
-        
+
+    
+    async def _get_response(self, url):
+        async with ClientSession() as session:
+            async with session.get(url=url,
+                                   headers=self.headers) as resp:
+                # TODO: Handle and log errors
+                if resp.status != 200:
+                    pass
+                html_page = await resp.text()
+
+        return html_page
 
     async def _update_article(self, article):
-        async with ClientSession() as session:
-            async with session.get(url=article.article_link,
-                                   headers=self.headers) as resp:
-                article_html = await resp.text()
-            
+        article_html = await self._get_response(article.article_link)
         article_soup = BeautifulSoup(article_html, 'lxml')
 
         rating_class = (
@@ -113,12 +125,7 @@ class HabrParser:
         ).get_text()
 
         if article.rating <= -10:
-            async with ClientSession() as session:
-                async with session.get(article.article_link) as resp:
-                    # Handle and log errors
-                    if resp.status != 200:
-                        pass
-                    article_html = await resp.text()
+            article_html = await self._get_response(article.article_link)
 
             text_soup = BeautifulSoup(article_html, 'lxml')
             text_class = (
@@ -126,12 +133,12 @@ class HabrParser:
                 'article-formatted-body ',
                 'article-formatted-body_version-2'
             )
-            article.text = article_soup.find(
+            article.text = text_soup.find(
                 'div',
                 class_=text_class
             )
 
-        # Check article.timestamp > last timestamp in database
+        # TODO: Check article.timestamp > last timestamp in database
         if False:
             return None
             
@@ -157,14 +164,9 @@ class HabrParser:
         return article_dict
 
     async def _get_habr_page(self, url):
-        async with ClientSession() as session:
-            async with session.get(url) as resp:
-                # Handle and log errors
-                if resp.status != 200:
-                    pass
-                page_html = await resp.text()
-        
+        page_html = await self._get_response(url)
         page_soup = BeautifulSoup(page_html, 'lxml')
+
         return self._parse_page(page_soup)
 
     async def parse_habr(self):
@@ -182,14 +184,14 @@ class HabrParser:
             for result in results:
                 article_dict.update(result)
 
-            # Change to database query
+            # TODO: Change to database query
             with open(self.json_file_name, 'w', encoding='utf-8') as file:
                 json.dump(article_dict, file)
         
         asyncio.run(async_work())
 
     async def update_articles(self, kind='all'):
-        # Change to database query
+        # TODO: Change to database query
         with open(self.json_file_name, 'r', encoding='utf-8') as file:
             saved_articles = json.load(file)
         
@@ -205,6 +207,6 @@ class HabrParser:
 
             saved_articles[article_name] = article
         
-        # Change to database query
+        # TODO: Change to database query
         with open(self.json_file_name, 'w', encoding='utf-8') as file:
             json.dump(saved_articles, file)
